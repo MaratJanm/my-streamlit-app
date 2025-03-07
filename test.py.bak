@@ -1,0 +1,135 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+from sklearn.cluster import KMeans, AgglomerativeClustering, DBSCAN, SpectralClustering
+from sklearn.mixture import GaussianMixture
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score
+import matplotlib.pyplot as plt
+from scipy.cluster.hierarchy import dendrogram, linkage
+import plotly.express as px
+import io
+
+# Заголовок приложения
+st.title('Улучшенная кластеризация клиентов ретейла')
+st.write('Пожалуйста, загрузите файл в формате .xlsx для анализа клиентов.')
+st.write('Используйте заголовки: CustomerID, PurchaseDate, TotalSpend, NumTransactions, Frequency, UniqueCategories, LoyaltyProgram.')
+
+# Загрузка файла
+uploaded_file = st.file_uploader("Выберите файл", type=["xlsx"])
+
+if uploaded_file is not None:
+    # Чтение данных
+    Retail_df = pd.read_excel(uploaded_file)
+
+    # Проверка наличия необходимых столбцов
+    required_columns = ['CustomerID', 'PurchaseDate', 'TotalSpend', 'NumTransactions', 'Frequency', 'UniqueCategories', 'LoyaltyProgram']
+    if not all(col in Retail_df.columns for col in required_columns):
+        st.error("Ошибка: Недостаточно заголовков в загруженном файле. Пожалуйста, убедитесь, что файл содержит все необходимые заголовки.")
+    else:
+        # Преобразование даты
+        Retail_df['PurchaseDate'] = pd.to_datetime(Retail_df['PurchaseDate'], format='%Y-%m-%d %H:%M:%S')
+
+        # Удаление строк с пропущенными значениями
+        Retail_df = Retail_df.dropna()
+
+        # Вывод первых строк данных
+        st.write("Первые 10 строк данных:")
+        st.write(Retail_df.head(10))
+
+        # Выбор признаков для кластеризации
+        features = st.multiselect(
+            "Выберите признаки для кластеризации",
+            options=['TotalSpend', 'NumTransactions', 'Frequency', 'UniqueCategories'],
+            default=['TotalSpend', 'Frequency']
+        )
+        X = Retail_df[features]
+
+        # Масштабирование данных
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+
+        # Выбор алгоритма
+        algorithm = st.selectbox(
+            "Выберите алгоритм кластеризации",
+            ["KMeans", "Иерархическая кластеризация", "DBSCAN", "Gaussian Mixture Model", "Spectral Clustering"]
+        )
+
+        if algorithm == "KMeans":
+            n_clusters = st.slider("Выберите количество кластеров", min_value=2, max_value=10, value=3)
+            clusters = KMeans(n_clusters=n_clusters)
+            Retail_df["cluster_label"] = clusters.fit_predict(X_scaled)
+
+        elif algorithm == "Иерархическая кластеризация":
+            n_clusters = st.slider("Выберите количество кластеров", min_value=2, max_value=10, value=3)
+            clusters = AgglomerativeClustering(n_clusters=n_clusters)
+            Retail_df["cluster_label"] = clusters.fit_predict(X_scaled)
+
+            # Дендрограмма
+            st.write("Дендрограмма:")
+            plt.figure(figsize=(12, 6))
+            Z = linkage(X_scaled, method='ward')
+            dendrogram(Z)
+            plt.title('Дендрограмма')
+            plt.xlabel('Индексы клиентов')
+            plt.ylabel('Расстояние')
+            st.pyplot(plt)
+
+        elif algorithm == "DBSCAN":
+            eps = st.slider("Выберите параметр eps", min_value=0.1, max_value=2.0, value=0.5)
+            min_samples = st.slider("Выберите min_samples", min_value=1, max_value=10, value=5)
+            clusters = DBSCAN(eps=eps, min_samples=min_samples)
+            Retail_df["cluster_label"] = clusters.fit_predict(X_scaled)
+
+        elif algorithm == "Gaussian Mixture Model":
+            n_clusters = st.slider("Выберите количество кластеров", min_value=2, max_value=10, value=3)
+            clusters = GaussianMixture(n_components=n_clusters)
+            Retail_df["cluster_label"] = clusters.fit_predict(X_scaled)
+            elif algorithm == "Spectral Clustering":
+            n_clusters = st.slider("Выберите количество кластеров", min_value=2, max_value=10, value=3)
+            clusters = SpectralClustering(n_clusters=n_clusters)
+            Retail_df["cluster_label"] = clusters.fit_predict(X_scaled)
+
+        # Визуализация кластеров
+        st.write("График кластеризации клиентов:")
+        if len(features) >= 2:
+            fig = px.scatter(
+                Retail_df, x=features[0], y=features[1], color='cluster_label',
+                title='Кластеры клиентов', labels={'color': 'Cluster Label'}
+            )
+            st.plotly_chart(fig)
+        else:
+            st.warning("Для визуализации необходимо выбрать как минимум 2 признака.")
+
+        # Оценка качества кластеризации
+        if st.button("Оценить качество кластеризации"):
+            if len(np.unique(Retail_df["cluster_label"])) > 1:  # Оценка возможна только если есть более 1 кластера
+                silhouette_avg = silhouette_score(X_scaled, Retail_df["cluster_label"])
+                calinski_harabasz = calinski_harabasz_score(X_scaled, Retail_df["cluster_label"])
+                davies_bouldin = davies_bouldin_score(X_scaled, Retail_df["cluster_label"])
+
+                st.write(f"Silhouette Score: {silhouette_avg:.2f}")
+                st.write(f"Calinski-Harabasz Index: {calinski_harabasz:.2f}")
+                st.write(f"Davies-Bouldin Index: {davies_bouldin:.2f}")
+            else:
+                st.warning("Для оценки качества необходимо как минимум 2 кластера.")
+
+        # Анализ кластеров
+        st.write("Средние значения по кластерам:")
+        cluster_means = Retail_df.groupby('cluster_label').mean()
+        st.write(cluster_means)
+
+        # Скачивание результатов
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            Retail_df.to_excel(writer, sheet_name='Кластеризация', index=False)
+        output.seek(0)
+
+        st.success("Кластеризация завершена успешно!")
+
+        st.download_button(
+            label="Скачать файл",
+            data=output,
+            file_name='clients_clusters.xlsx',
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
