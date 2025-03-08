@@ -92,23 +92,90 @@ if uploaded_file is not None:
         elif method == "Иерархическая":
             n_clusters = st.sidebar.slider("Количество кластеров", 2, 10, 3)
             linkage_method = st.sidebar.selectbox("Тип связи", ["ward", "complete", "average", "single"])
+            
+            # Создание модели
+            if linkage_method == "ward":
+                # Для метода 'ward' используем евклидову метрику
+                model = AgglomerativeClustering(
+                    n_clusters=n_clusters,
+                    linkage=linkage_method,
+                    metric='euclidean'  # Используем 'metric' вместо 'affinity'
+                )
+            else:
+                # Для методов 'complete', 'average', 'single' явно указываем метрику
+                model = AgglomerativeClustering(
+                    n_clusters=n_clusters,
+                    linkage=linkage_method,
+                    metric='euclidean'  # Используем 'metric' вместо 'affinity'
+                )
+            
+            # Обучение модели
+            model.fit(X_scaled)
+            
+            # Построение дендрограммы
+            try:
+                if hasattr(model, 'distances_') and model.distances_ is not None:
+                    plot_dendrogram(model, truncate_mode='level', p=3)
+                else:
+                    st.warning("Дендрограмма недоступна для текущих параметров")
+            except Exception as e:
+                st.error(f"Ошибка при построении дендрограммы: {str(e)}")
+                st.warning("Попробуйте изменить параметры кластеризации")
+                
         elif method == "GMM":
             n_clusters = st.sidebar.slider("Количество кластеров", 2, 10, 3)
 
-        # Оптимизация числа кластеров для всех методов, кроме DBSCAN
-        if method in ["K-Means", "Иерархическая", "GMM"]:
+        # Оптимизация числа кластеров для K-Means
+        if method == "K-Means":
             st.subheader("Оптимизация числа кластеров")
             
             cluster_range = range(2, 11)
-            inertias = []  # Для K-Means
-            silhouettes = []  # Для всех методов
+            inertias = []  # Для метода локтя
+            silhouettes = []  # Для силуэтного коэффициента
             
             for k in cluster_range:
-                if method == "K-Means":
-                    model_temp = KMeans(n_clusters=k, random_state=42)
-                    labels_temp = model_temp.fit_predict(X_scaled)
-                    inertias.append(model_temp.inertia_)
-                elif method == "Иерархическая":
+                model_temp = KMeans(n_clusters=k, random_state=42)
+                labels_temp = model_temp.fit_predict(X_scaled)
+                inertias.append(model_temp.inertia_)
+                
+                # Расчет силуэтного коэффициента
+                if len(np.unique(labels_temp)) > 1:
+                    silhouettes.append(silhouette_score(X_scaled, labels_temp))
+                else:
+                    silhouettes.append(0)
+            
+            # Создаем две колонки для графиков
+            col1, col2 = st.columns(2)
+            
+            # График метода локтя
+            with col1:
+                fig1, ax1 = plt.subplots(figsize=(6, 4))
+                ax1.plot(cluster_range, inertias, marker='o')
+                ax1.set_title('Метод локтя')
+                ax1.set_xlabel('Количество кластеров')
+                ax1.set_ylabel('Инерция')
+                st.pyplot(fig1)
+                plt.close(fig1)
+            
+            # График силуэтного коэффициента
+            with col2:
+                fig2, ax2 = plt.subplots(figsize=(6, 4))
+                ax2.plot(cluster_range, silhouettes, marker='o', color='orange')
+                ax2.set_title('Силуэтный коэффициент')
+                ax2.set_xlabel('Количество кластеров')
+                ax2.set_ylabel('Силуэтный коэффициент')
+                st.pyplot(fig2)
+                plt.close(fig2)
+
+        # Оптимизация числа кластеров для иерархической кластеризации и GMM
+        elif method in ["Иерархическая", "GMM"]:
+            st.subheader("Оптимизация числа кластеров")
+            
+            cluster_range = range(2, 11)
+            silhouettes = []  # Для силуэтного коэффициента
+            
+            for k in cluster_range:
+                if method == "Иерархическая":
                     model_temp = AgglomerativeClustering(n_clusters=k, linkage=linkage_method)
                     labels_temp = model_temp.fit_predict(X_scaled)
                 elif method == "GMM":
@@ -121,15 +188,12 @@ if uploaded_file is not None:
                 else:
                     silhouettes.append(0)
             
-            # Построение графиков
-            fig, ax = plt.subplots(figsize=(10, 5))
-            if method == "K-Means":
-                ax.plot(cluster_range, inertias, marker='o', label='Inertia (Elbow Method)')
-            ax.plot(cluster_range, silhouettes, marker='o', label='Silhouette Score', color='orange')
-            ax.set_title('Оптимизация числа кластеров')
+            # График силуэтного коэффициента
+            fig, ax = plt.subplots(figsize=(8, 4))
+            ax.plot(cluster_range, silhouettes, marker='o', color='orange')
+            ax.set_title('Силуэтный коэффициент')
             ax.set_xlabel('Количество кластеров')
-            ax.set_ylabel('Метрика')
-            ax.legend()
+            ax.set_ylabel('Силуэтный коэффициент')
             st.pyplot(fig)
             plt.close(fig)
 
@@ -149,14 +213,14 @@ if uploaded_file is not None:
         # Оценка качества кластеризации
         if method != "DBSCAN" and len(np.unique(labels)) > 1:
             silhouette = silhouette_score(X_scaled, labels)
-            st.metric("Silhouette Score", value=f"{silhouette:.2f}")
+            st.metric("Силуэтный коэффициент", value=f"{silhouette:.2f}")
         elif method == "DBSCAN":
             noise_percent = (labels == -1).sum() / len(labels) * 100
             st.metric("% шума", f"{noise_percent:.1f}%")
 
         # Визуализация
         st.subheader("Результаты кластеризации")
-        
+
         col1, col2 = st.columns(2)
         with col1:
             fig, ax = plt.subplots(figsize=(8, 5))
@@ -168,6 +232,8 @@ if uploaded_file is not None:
                 alpha=0.7
             )
             ax.set_title('Сумма покупок vs Частота')
+            ax.set_xlabel('Сумма покупок (TotalSpend)')  # Подпись оси X
+            ax.set_ylabel('Частота (Frequency)')         # Подпись оси Y
             st.pyplot(fig)
             plt.close(fig)
 
@@ -184,14 +250,33 @@ if uploaded_file is not None:
                 alpha=0.7
             )
             ax.set_title('PCA проекция')
+            ax.set_xlabel('Первая главная компонента (PC1)')  # Подпись оси X
+            ax.set_ylabel('Вторая главная компонента (PC2)')  # Подпись оси Y
             st.pyplot(fig)
             plt.close(fig)
 
         # Анализ кластеров
         st.subheader("Характеристики кластеров")
-        
+
+        # Глобальные средние значения
+        global_mean = Retail_df[numeric_cols].mean()
+        #st.markdown("#### Глобальные средние значения:")
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            st.markdown("**Глобальные средние значения:**")
+            for feature in numeric_cols:
+                value = global_mean[feature]
+                st.markdown(f"""
+                <div style="padding:5px; border-bottom:1px solid #eee">
+                    {feature}: <strong>{value:.1f}</strong>
+                </div>
+                """, unsafe_allow_html=True)
+
+
+        st.markdown("---")
+
+        # Характеристики каждого кластера
         cluster_stats = Retail_df.groupby('Cluster')[numeric_cols].median()
-        global_median = Retail_df[numeric_cols].median()
         total_clients = len(Retail_df)
 
         for cluster in sorted(cluster_stats.index):
@@ -215,17 +300,17 @@ if uploaded_file is not None:
             
             with col2:
                 st.markdown("**Отклонение от среднего:**")
-                deviations = (cluster_data - global_median) / global_median * 100
+                deviations = (cluster_data - global_mean) / global_mean * 100
                 
                 for feature, value in deviations.items():
                     arrow = ""
                     color = "black"
                     if value > 0:
                         arrow = "▲"
-                        color = "#2ecc71"
+                        color = "#2ecc71"  # Зеленый
                     elif value < 0:
                         arrow = "▼" 
-                        color = "#e74c3c"
+                        color = "#e74c3c"  # Красный
                     
                     st.markdown(f"""
                     <div style="padding:5px; border-bottom:1px solid #eee">

@@ -93,24 +93,55 @@ if uploaded_file is not None:
             n_clusters = st.sidebar.slider("Количество кластеров", 2, 10, 3)
             linkage_method = st.sidebar.selectbox("Тип связи", ["ward", "complete", "average", "single"])
             
-            # Создание модели с вычислением расстояний
+            # Создание модели
             model = AgglomerativeClustering(
                 n_clusters=n_clusters,
                 linkage=linkage_method,
-                compute_distances=True,  # Ключевой параметр
-                metric='euclidean' if linkage_method == 'ward' else 'precomputed'
+                metric='euclidean',  # Используем 'metric' вместо 'affinity'
+                compute_distances=True  # Включаем вычисление расстояний
             )
+            
+            # Обучение модели
             model.fit(X_scaled)
             
-            # Построение дендрограммы с проверкой атрибутов
+            # Построение дендрограммы
             try:
                 if hasattr(model, 'distances_') and model.distances_ is not None:
-                    plot_dendrogram(model, truncate_mode='level', p=3)
+                    # Используем distances_ для построения дендрограммы
+                    counts = np.zeros(model.children_.shape[0])
+                    n_samples = len(model.labels_)
+                    for i, merge in enumerate(model.children_):
+                        current_count = 0
+                        for child_idx in merge:
+                            if child_idx < n_samples:
+                                current_count += 1
+                            else:
+                                current_count += counts[child_idx - n_samples]
+                        counts[i] = current_count
+
+                    linkage_matrix = np.column_stack([model.children_, model.distances_, counts]).astype(float)
+                    fig, ax = plt.subplots(figsize=(10, 5))
+                    dendrogram(linkage_matrix, truncate_mode='level', p=3)
+                    plt.title('Дендрограмма')
+                    plt.xlabel("Индекс образца")
+                    plt.ylabel("Расстояние")
+                    st.pyplot(fig)
+                    plt.close(fig)
                 else:
-                    st.warning("Дендрограмма недоступна для текущих параметров")
+                    # Если distances_ недоступен, используем scipy.cluster.hierarchy.linkage
+                    from scipy.cluster.hierarchy import linkage, dendrogram
+                    Z = linkage(X_scaled, method=linkage_method, metric='euclidean')
+                    fig, ax = plt.subplots(figsize=(10, 5))
+                    dendrogram(Z, truncate_mode='level', p=3)
+                    plt.title('Дендрограмма')
+                    plt.xlabel("Индекс образца")
+                    plt.ylabel("Расстояние")
+                    st.pyplot(fig)
+                    plt.close(fig)
             except Exception as e:
                 st.error(f"Ошибка при построении дендрограммы: {str(e)}")
                 st.warning("Попробуйте изменить параметры кластеризации")
+                
         elif method == "GMM":
             n_clusters = st.sidebar.slider("Количество кластеров", 2, 10, 3)
 
